@@ -1,0 +1,235 @@
+---
+title: "Producción de leche en Colombia"
+format: dashboard
+editor: visual
+orientation: columns
+---
+
+## Quarto
+
+```{r}
+#| context: setup
+
+library(dplyr)
+library(plotly)
+library(readxl)
+library(tidyr)
+library(treemap)
+library(highcharter)
+library(viridis)
+library(forecast)
+library(ggplot2)
+library(RColorBrewer)
+library(htmltools)
+library(openxlsx)
+library(sf)
+library(leaflet)
+library(tidyverse)
+
+
+# Leer la base de datos
+library(readxl)
+prodleche <- read_excel("C:/Users/dr200/OneDrive/Escritorio/dashboard.xlsx", sheet = 1)
+
+prodleche1 <- read_excel("C:/Users/dr200/OneDrive/Escritorio/dashboard.xlsx", sheet = 2)
+
+
+
+# Especificamos el inicio y el final de la base de datos.
+prodleche_ts <- ts(prodleche1$`Cant Kg`, start = c(2018, 1),frequency = 12)  
+
+# Generar el modelo ARIMA
+modelo_3 <- arima(prodleche_ts, order = c(1, 1, 1))
+
+# Realizar el pronóstico para los próximos 12 períodos
+arima_fc <- forecast(modelo_3, h = 12)
+
+# Calcular los 5 departamentos con mayor producción
+top5_departamentos <- prodleche %>%
+  group_by(`Departamento Proc.`) %>%
+  summarise(Cantidad_Total = sum(`Cant Kg`, na.rm = TRUE)) %>%
+  arrange(desc(Cantidad_Total)) %>%
+  slice_head(n = 5)
+
+#Mapa
+datos <- read.xlsx("mapa.xlsx")
+mapa <- read_sf("MGN_DPTO_POLITICO.shp") %>% st_transform(crs = 4326)
+
+
+
+```
+
+#  {.sidebar}
+
+Nuestro trabajo presenta datos y los resultados del pronóstico para:
+
+|              |                     |
+|--------------|---------------------|
+| **Variable** | Producción de leche |
+| **Pais**     | Colombia            |
+| **Periodo**  | 2018-2024           |
+
+# Resultados
+
+```{r, fig.show='hide'}
+# Preparar los datos para el treemap
+dfitems <- prodleche %>%
+  group_by(Alimento) %>%
+  summarise(Cantidad_Total = sum(`Cant Kg`, na.rm = TRUE)) %>%
+  arrange(desc(Cantidad_Total))
+
+# Crear el treemap
+tm <- invisible(treemap(dfitems, 
+              index = "Alimento",  # Usamos directamente la columna 'Alimento' como índice
+              vSize = "Cantidad_Total", 
+              vColor = "Cantidad_Total",
+              type = "value", 
+              palette = rev(viridis(6))))
+
+
+
+```
+
+## Row
+
+### Column {.tabset width="50%"}
+
+```{r treemap}
+#| title: "Mapa interactivo"
+
+# Generar el treemap interactivo
+hctreemap(tm, allowDrillToNode = FALSE, layoutAlgorithm = "squarified") %>% 
+  hc_add_theme(hc_theme_flat())
+
+```
+
+```{r}
+# Crear un data frame con la serie histórica
+historical_data <- data.frame(
+  Fecha = time(prodleche_ts),
+  Produccion = as.numeric(prodleche_ts)
+)
+
+```
+
+```{r}
+# Crear un data frame con el pronóstico
+forecast_data <- data.frame(
+  Fecha = time(arima_fc$mean),
+  Pronostico = as.numeric(arima_fc$mean),
+  LimiteInferior = as.numeric(arima_fc$lower[, 2]),  # Nivel de confianza del 95%
+  LimiteSuperior = as.numeric(arima_fc$upper[, 2])   # Nivel de confianza del 95%
+)
+```
+
+
+```{r pronostico}
+#| title: "Pronóstico"
+
+# Combinar datos historicos y pronostico en un grafico interactivo
+hchart(historical_data, type = "line", hcaes(x = Fecha, y = Produccion), name = "Serie Historica", color = "#6a0dad") %>%
+  hc_add_series(forecast_data, type = "line", hcaes(x = Fecha, y = Pronostico), name = "Pronostico", color = "#6a0dad") %>%
+  hc_add_series(forecast_data, type = "arearange", hcaes(x = Fecha, low = LimiteInferior, high = LimiteSuperior),
+                name = "Intervalo de Confianza", color = "lightblue", fillOpacity = 0.3) %>%
+  hc_title(text = "Produccion Lactea en Colombia") %>%
+  hc_subtitle(text = "Pronostico ARIMA (1,1,1)") %>%
+  hc_xAxis(title = list(text = "Tiempo")) %>%
+  hc_yAxis(title = list(text = "Cantidad en kg")) %>%
+  hc_add_theme(hc_theme_flat())
+
+
+```
+
+```{r top-departamentos}
+#| title: "Ranking de departamentos"
+
+# Crear el grafico con barras azules
+hchart(top5_departamentos, type = "bar", hcaes(x = `Departamento Proc.`, y = Cantidad_Total)) %>%
+  hc_title(text = "Top 5 Departamentos con Mayor Produccion") %>%
+  hc_xAxis(title = list(text = "Departamento")) %>%
+  hc_yAxis(title = list(text = "Produccion (kg)")) %>%
+  hc_plotOptions(series = list(color = "#6a0dad")) %>%  # Cambiar color a azul
+  hc_add_theme(hc_theme_flat())
+```
+
+```{r grafico-de-caja}
+#| title: "Gráfico de caja"
+
+# Crear el gráfico de caja
+p <- ggplot(prodleche, aes(x = Alimento, y = `Cant Kg`, fill = Alimento)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Distribucion de Produccion por Tipo de Alimento",
+       x = "Alimento", y = "Produccion (kg)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplotly(p)
+```
+
+```{r}
+# Agrupar por Departamento y sumar la columna Producción
+leche <- datos %>%
+  group_by(Departamento) %>%
+  summarise(Produccion = sum(Produccion, na.rm = TRUE))
+```
+
+```{r}
+# Normalizar texto para hacer el join
+leche <- leche %>%
+  mutate(Departamento = trimws(tolower(Departamento)))
+mapa <- mapa %>%
+  mutate(DPTO_CNMBR = trimws(tolower(DPTO_CNMBR)))
+
+```
+
+```{r}
+# Unir los datos y asignar 0 a las ciudades sin producción
+mapa <- mapa %>%
+  left_join(leche, by = c("DPTO_CNMBR" = "Departamento")) %>%
+  mutate(Produccion = replace_na(Produccion, 0))
+
+```
+
+# Mapa interactivo
+
+```{r}
+
+# Definir la función para renderizar el mapa
+plot_map_poly <- function(map_input, show_variable, group_variable, units, palette, legend_title) {        
+  x <- enquo(show_variable)
+  group <- enquo(group_variable)
+  
+  label_names <- map_input %>% pull(!!group)
+  x_values <- pull(map_input, !!x)
+  
+  pal <- colorNumeric(palette = palette, domain = x_values)
+  
+  labels <- sprintf(
+    paste0("<strong>%s</strong><br/>%g", units),
+    label_names, x_values
+  ) %>% lapply(htmltools::HTML)
+  
+  leaflet(map_input) %>%
+    addProviderTiles(providers$CartoDB.Positron) %>%
+    addPolygons(
+      weight = 1, opacity = 1.0, fillOpacity = 1,
+      color = "white", fillColor = ~pal(x_values),
+      highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = TRUE),
+      label = labels
+    ) %>%
+    addLegend(
+      pal = pal, values = x_values, opacity = 0.7,
+      title = legend_title, position = "topright"
+    )
+}
+
+
+```
+
+
+
+```{r}
+# Generar el mapa
+plot_map_poly(mapa, Produccion, DPTO_CNMBR, "Kilos", brewer.pal(n = 5, name = "PuRd"), "Produccion (Kilos)")
+
+```
