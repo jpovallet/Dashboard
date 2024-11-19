@@ -1,0 +1,167 @@
+---
+title: "Dashboard."
+format: html
+editor: visual
+---
+
+```{r}
+# Cargar las librerías necesarias
+
+library(dplyr)
+library(plotly)
+library(readxl)
+library(tidyr)
+library(treemap)
+library(highcharter)
+library(viridis)
+
+
+# Leer la base de datos
+prodleche <- read_excel("Downloads/dashboard.xlsx", sheet = 1)
+```
+
+```{r}
+# Preparar los datos para el treemap
+dfitems <- prodleche %>%
+  group_by(Alimento) %>%
+  summarise(Cantidad_Total = sum(`Cant Kg`, na.rm = TRUE)) %>%
+  arrange(desc(Cantidad_Total))
+
+# Crear el treemap
+tm <- treemap(dfitems, 
+              index = "Alimento",  # Usamos directamente la columna 'Alimento' como índice
+              vSize = "Cantidad_Total", 
+              vColor = "Cantidad_Total",
+              type = "value", 
+              palette = rev(viridis(6)))
+
+# Generar el treemap interactivo
+hctreemap(tm, allowDrillToNode = FALSE, layoutAlgorithm = "squarified") %>% 
+  hc_add_theme(hc_theme_flat())
+
+
+```
+
+```{r}
+
+library(readxl)
+prodleche <- read_excel("Downloads/dashboard.xlsx", sheet = 2)
+View(prodleche)
+
+
+# Especificamos el inicio y el final de la base de datos.
+prodleche_ts <- ts(prodleche[[2]], start = c(2018, 1),frequency = 12)  
+
+# Verificamos la serie temporal
+print(prodleche_ts)
+```
+
+```{r}
+modelo_3 <- arima(prodleche_ts, order = c(1, 1, 1))
+
+arima_fc <- forecast(modelo_3, h = 12)
+plot_forecast(arima_fc,
+ title = "Pronostico modelo AR(3)", 
+ Ytitle = "Valores",
+ Xtitle = "Años")
+```
+
+```{r}
+# Cargar las librerías necesarias
+library(forecast)
+library(highcharter)
+library(dplyr)
+
+# Generar el modelo ARIMA
+modelo_3 <- arima(prodleche_ts, order = c(1, 1, 1))
+
+# Realizar el pronóstico para los próximos 12 períodos
+arima_fc <- forecast(modelo_3, h = 12)
+
+# Crear un data frame con la serie histórica
+historical_data <- data.frame(
+  Fecha = time(prodleche_ts),
+  Producción = as.numeric(prodleche_ts)
+)
+
+# Crear un data frame con el pronóstico
+forecast_data <- data.frame(
+  Fecha = time(arima_fc$mean),
+  Pronóstico = as.numeric(arima_fc$mean),
+  LímiteInferior = as.numeric(arima_fc$lower[, 2]),  # Nivel de confianza del 95%
+  LímiteSuperior = as.numeric(arima_fc$upper[, 2])   # Nivel de confianza del 95%
+)
+
+# Combinar datos históricos y pronóstico en un gráfico interactivo
+hchart(historical_data, type = "line", hcaes(x = Fecha, y = Producción), name = "Serie Histórica", color = "#6a0dad") %>%
+  hc_add_series(forecast_data, type = "line", hcaes(x = Fecha, y = Pronóstico), name = "Pronóstico", color = "#6a0dad") %>%
+  hc_add_series(forecast_data, type = "arearange", hcaes(x = Fecha, low = LímiteInferior, high = LímiteSuperior),
+                name = "Intervalo de Confianza", color = "lightblue", fillOpacity = 0.3) %>%
+  hc_title(text = "Producción Láctea en Colombia") %>%
+  hc_subtitle(text = "Pronóstico ARIMA (1,1,1)") %>%
+  hc_xAxis(title = list(text = "Años")) %>%
+  hc_yAxis(title = list(text = "Cantidad en kg")) %>%
+  hc_add_theme(hc_theme_flat())
+
+
+```
+
+```{r}
+library(highcharter)
+
+
+# Calcular los 5 departamentos con mayor producción
+top5_departamentos <- prodleche %>%
+  group_by(`Departamento Proc.`) %>%
+  summarise(Cantidad_Total = sum(`Cant Kg`, na.rm = TRUE)) %>%
+  arrange(desc(Cantidad_Total)) %>%
+  slice_head(n = 5)
+
+# Crear el gráfico con barras azules
+hchart(top5_departamentos, type = "bar", hcaes(x = `Departamento Proc.`, y = Cantidad_Total)) %>%
+  hc_title(text = "Top 5 Departamentos con Mayor Producción") %>%
+  hc_xAxis(title = list(text = "Departamento")) %>%
+  hc_yAxis(title = list(text = "Producción (kg)")) %>%
+  hc_plotOptions(series = list(color = "#6a0dad")) %>%  # Cambiar color a azul
+  hc_add_theme(hc_theme_flat())
+
+
+```
+
+```{r}
+library(ggplot2)
+library(plotly)
+
+# Crear el gráfico de caja
+p <- ggplot(prodleche, aes(x = Alimento, y = `Cant Kg`, fill = Alimento)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, outlier.size = 2) +
+  labs(title = "Distribución de Producción por Tipo de Alimento",
+       x = "Alimento", y = "Producción (kg)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplotly(p)
+
+
+```
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
